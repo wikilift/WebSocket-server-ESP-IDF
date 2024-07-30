@@ -1,0 +1,14 @@
+name: websocket_server
+version: 0.0.1
+description: WSServer for idf
+url: "https://github.com/wikilift/WebSocket-server-ESP-IDF"  
+license: "MIT"
+targets:
+  - esp32
+  - esp32s2
+  - esp32c3
+maintainers:
+  - wikilift
+include:
+  - "/certs"
+  - "/examples" 
