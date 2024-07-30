@@ -1,3 +1,36 @@
+/**
+ * @file wsserver.cpp
+ * @brief WebSocket server class implementation.
+ * 
+ * This file defines the WSServer class implementation.
+ * 
+ * @author Daniel Giménez
+ * @date 2024-07-28
+ * @license MIT License
+ * 
+ * @par License:
+ * 
+ * MIT License
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
 #include "wsserver.h"
 #include <cstring>
 #include <esp_event.h>
@@ -26,9 +59,11 @@ std::function<void(httpd_req_t *, httpd_ws_frame_t &)> WSServer::close_message_c
 std::function<void(int)> WSServer::client_connected_callback;
 std::function<void(int)> WSServer::client_disconnected_callback;
 
-char* WSServer:: auth_user=nullptr;
-   
-char*  WSServer::auth_password=nullptr;
+char *WSServer::auth_user = nullptr;
+
+char *WSServer::auth_password = nullptr;
+
+std::set<int> WSServer::authenticated_clients;
 
 KeepAlive *WSServer::keep_alive = nullptr;
 
@@ -50,12 +85,12 @@ WSServer::WSServer() : server(NULL), ws_send_queue(NULL), max_clients(4) {}
 
 void WSServer::start(uint16_t _port, const char *ssid,
                      const char *password, bool isAP, bool use_ssl, size_t max_clients,
-                     size_t keep_alive_period_ms, size_t not_alive_after_ms,  char *auth_user,  char *auth_password,
+                     size_t keep_alive_period_ms, size_t not_alive_after_ms, char *auth_user, char *auth_password,
                      std::function<void()> extra_config)
 {
     port = _port;
     this->max_clients = max_clients;
-   if (auth_user)
+    if (auth_user)
     {
         WSServer::auth_user = strdup(auth_user);
     }
@@ -269,10 +304,19 @@ void WSServer::onClientDisconnected(std::function<void(int)> callback)
 
 esp_err_t WSServer::ws_handler(httpd_req_t *req)
 {
-    if (!authenticate(req))
+    if (auth_user != nullptr && auth_password != nullptr)
     {
-        return ESP_FAIL;
+        int sockfd = httpd_req_to_sockfd(req);
+        if (authenticated_clients.find(sockfd) == authenticated_clients.end())
+        {
+            if (!authenticate(req))
+            {
+                return ESP_FAIL;
+            }
+            authenticated_clients.insert(sockfd);
+        }
     }
+
     if (req->method == HTTP_GET)
     {
         if (debug)
@@ -342,10 +386,8 @@ esp_err_t WSServer::ws_handler(httpd_req_t *req)
         }
         else
         {
-            if (debug)
-            {
-                ESP_LOGI(TAG, "Received text message: %s", ws_pkt.payload);
-            }
+
+            ESP_LOGI(TAG, "Received text message: %s", ws_pkt.payload);
         }
         break;
     case HTTPD_WS_TYPE_BINARY:
@@ -355,10 +397,8 @@ esp_err_t WSServer::ws_handler(httpd_req_t *req)
         }
         else
         {
-            if (debug)
-            {
-                ESP_LOGI(TAG, "Received binary message");
-            }
+
+            ESP_LOGI(TAG, "Received binary message");
         }
         break;
     case HTTPD_WS_TYPE_CLOSE:
@@ -368,26 +408,23 @@ esp_err_t WSServer::ws_handler(httpd_req_t *req)
         }
         else
         {
-            if (debug)
-            {
-                ESP_LOGI(TAG, "Received close message");
-            }
+
+            ESP_LOGI(TAG, "Received close message");
+
             ws_close_fd(req->handle, httpd_req_to_sockfd(req));
         }
         break;
     case HTTPD_WS_TYPE_PING:
-        if (debug)
-        {
-            ESP_LOGI(TAG, "Received PING message, replying with PONG");
-        }
+
+        ESP_LOGI(TAG, "Received PING message, replying with PONG");
+
         ws_pkt.type = HTTPD_WS_TYPE_PONG;
         httpd_ws_send_frame(req, &ws_pkt);
         break;
     default:
-        if (debug)
-        {
-            ESP_LOGW(TAG, "Received unknown message type");
-        }
+
+        ESP_LOGW(TAG, "Received unknown message type");
+
         break;
     }
 
@@ -404,20 +441,21 @@ esp_err_t WSServer::ws_open_fd(httpd_handle_t hd, int sockfd)
     {
         client_connected_callback(sockfd);
     }
+  
     return keep_alive->addClient(sockfd) ? ESP_OK : ESP_FAIL;
 }
 
 void WSServer::ws_close_fd(httpd_handle_t hd, int sockfd)
 {
-    if (!client_disconnected_callback)
-    {
-        ESP_LOGI(TAG, "Client disconnected %d", sockfd);
-    }
+    ESP_LOGI(TAG, "Client disconnected %d", sockfd);
+
     if (client_disconnected_callback)
     {
         client_disconnected_callback(sockfd);
     }
+
     keep_alive->removeClient(sockfd);
+    authenticated_clients.erase(sockfd);
     close(sockfd);
 }
 
@@ -481,8 +519,6 @@ httpd_handle_t WSServer::start_ws_server(uint16_t port)
     conf.close_fn = ws_close_fd;
     conf.server_port = port;
 
-    // conf.recv_wait_timeout=1;
-    // conf.send_wait_timeout=1;
     conf.stack_size = 8192;
 
     esp_err_t ret = httpd_start(&server, &conf);
@@ -507,7 +543,10 @@ esp_err_t WSServer::stop_ws_server(httpd_handle_t server)
 
 void WSServer::ws_server_send_messages()
 {
-    ESP_LOGW(TAG, "Message task is ready");
+    if (debug)
+    {
+        ESP_LOGW(TAG, "Message task is ready");
+    }
     ws_message_t msg;
     for (;;)
     {
@@ -566,7 +605,7 @@ void WSServer::ws_server_send_messages()
 
 bool WSServer::authenticate(httpd_req_t *req)
 {
-    if (auth_user==nullptr|| auth_password==nullptr)
+    if (auth_user == nullptr || auth_password == nullptr)
     {
         return true;
     }
@@ -586,7 +625,7 @@ bool WSServer::authenticate(httpd_req_t *req)
             if (err == 0)
             {
                 std::string decoded_str(reinterpret_cast<char *>(decoded), decoded_len);
-                 char expected_auth[128];
+                char expected_auth[128];
                 snprintf(expected_auth, sizeof(expected_auth), "%s:%s", auth_user, auth_password);
                 std::string expected(expected_auth);
 
