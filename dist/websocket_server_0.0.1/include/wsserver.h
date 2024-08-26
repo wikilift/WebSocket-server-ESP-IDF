@@ -298,8 +298,10 @@ private:
     esp_err_t enqueueMessage(int fd, const uint8_t *message, size_t length, bool broadcast, httpd_ws_type_t message_type);
 
     /**
+     * 
      * @brief Authenticate the incoming HTTP request using Basic Authentication.
      *
+     * 
      * @param req Pointer to the HTTP request.
      * @return True if authentication is successful or disabled, false otherwise.
      */

@@ -140,6 +140,7 @@ private:
     /**
      * @brief Task function for keep-alive checks.
      * @param arg Pointer to the KeepAlive instance.
+     * 
      */
     static void task(void *arg);
 
