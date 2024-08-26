@@ -35,7 +35,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
 #pragma once
 
 #include <vector>
@@ -73,6 +72,7 @@ public:
         bool (*check_client_alive_cb)(KeepAlive *h, int fd);   /**< Callback function for checking if a client is alive */
         bool (*client_not_alive_cb)(KeepAlive *h, int fd);     /**< Callback function for handling clients that are not alive */
         void *user_ctx;                           /**< User context */
+        bool task_enabled;
     };
 
     /**
@@ -132,9 +132,9 @@ public:
 
     /**
      * @brief Get the list of clients.
-     * @return Reference to the vector of clients.
+     * @return Reference to the vector of pointers to clients.
      */
-    const std::vector<Client>& getClients() const;
+    const std::vector<KeepAlive::Client*>& getClients() const;
 
 private:
     /**
@@ -151,7 +151,8 @@ private:
 
     Config config;                   /**< Configuration for the KeepAlive instance */
     QueueHandle_t queue;             /**< Queue handle for keep-alive messages */
-    std::vector<Client> clients;     /**< Vector of clients */
+    std::vector<Client*> clients;    /**< Vector of pointers to clients */
     bool running;                    /**< Flag indicating if the keep-alive task is running */
+    static constexpr const bool debug=false; /**< Flag to give debug info */
 };
 
