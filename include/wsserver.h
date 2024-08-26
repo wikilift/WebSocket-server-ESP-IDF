@@ -42,7 +42,8 @@
 #include <string>
 #include <set>
 
-#define MAX_MESSAGE_SIZE 1024
+#define MAX_MESSAGE_SIZE (15 * 1024)
+
 
 #if !CONFIG_HTTPD_WS_SUPPORT
 #error This example cannot be used unless HTTPD_WS_SUPPORT is enabled in esp-http-server component configuration
@@ -76,7 +77,7 @@ public:
      * @param extra_config Optional function for additional configuration.
      */
 
-    void start(uint16_t _port = 80, const char *ssid = "default_ssid",
+    esp_err_t start(uint16_t _port = 80, const char *ssid = "default_ssid",
                const char *password = "default_password", bool isAP = true, bool use_ssl = false,
                size_t max_clients = 4, size_t keep_alive_period_ms = 10000,
                size_t not_alive_after_ms = 30000, char *auth_user = nullptr, char *auth_password = nullptr,
@@ -312,7 +313,6 @@ private:
     static const httpd_uri_t ws;               /**< URI handler for WebSocket */
     static uint16_t port;                      /**< Port number */
     static const constexpr bool debug = false; /**< Debug flag */
-    static uint8_t buffer[MAX_MESSAGE_SIZE];   /**< Buffer for messages */
 
     static std::function<void(httpd_req_t *, httpd_ws_frame_t &)> text_message_callback;   /**< Callback for text messages */
     static std::function<void(httpd_req_t *, httpd_ws_frame_t &)> binary_message_callback; /**< Callback for binary messages */
