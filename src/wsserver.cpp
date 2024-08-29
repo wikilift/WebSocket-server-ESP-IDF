@@ -43,14 +43,14 @@
 #include "esp_wifi.h"
 #include <mbedtls/base64.h>
 #include "lwip/sockets.h"
-
 #include <esp_https_server.h>
 
 #define TIMEOUT 1000
-#define MAX_QUEUE_SIZE 10
+#define MAX_QUEUE_SIZE 5
 
 const char *WSServer::TAG = "WSServer";
 uint16_t WSServer::port = 80;
+bool WSServer::keep_alive_enabled = true;
 
 std::function<void(httpd_req_t *, httpd_ws_frame_t &)> WSServer::text_message_callback;
 std::function<void(httpd_req_t *, httpd_ws_frame_t &)> WSServer::binary_message_callback;
@@ -65,6 +65,8 @@ char *WSServer::auth_password = nullptr;
 std::set<int> WSServer::authenticated_clients;
 
 KeepAlive *WSServer::keep_alive = nullptr;
+
+TaskHandle_t serverTask;
 
 const httpd_uri_t WSServer::ws = {
     .uri = "/ws",
@@ -83,12 +85,19 @@ WSServer &WSServer::getInstance()
 WSServer::WSServer() : server(NULL), ws_send_queue(NULL), max_clients(4) {}
 
 esp_err_t WSServer::start(uint16_t _port, const char *ssid,
-                          const char *password, bool isAP, bool use_ssl, size_t max_clients,
-                          size_t keep_alive_period_ms, size_t not_alive_after_ms, char *auth_user, char *auth_password,
+                          const char *password,
+                          bool isAP, bool use_ssl,
+                          size_t max_clients,
+                          size_t keep_alive_period_ms,
+                          size_t not_alive_after_ms,
+                          char *auth_user,
+                          char *auth_password,
+                          bool keep_alive_enabled,
                           std::function<void()> extra_config)
 {
     port = _port;
     this->max_clients = max_clients;
+    this->keep_alive_enabled = keep_alive_enabled;
     if (auth_user)
     {
         WSServer::auth_user = strdup(auth_user);
@@ -204,7 +213,7 @@ esp_err_t WSServer::start(uint16_t _port, const char *ssid,
         server = start_ws_server(this->port);
     }
 
-    xTaskCreatePinnedToCore(&WSServer::ws_server_send_messages_task, "ws_server_send_messages_task", 10024, this, 5, nullptr, 1);
+    xTaskCreate(&WSServer::ws_server_send_messages_task, "ws_server_send_messages_task", 10024, this, 5, &serverTask);
     return ESP_OK;
 }
 
@@ -231,7 +240,11 @@ esp_err_t WSServer::enqueueMessage(int fd, const uint8_t *message, size_t length
     if (xQueueSend(ws_send_queue, &ws_message, TIMEOUT) != pdPASS)
     {
         ESP_LOGE(TAG, "Failed to enqueue message");
-        vPortFree(ws_message);
+        if (ws_message != nullptr)
+        {
+            vPortFree(ws_message);
+        }
+
         return ESP_FAIL;
     }
 
@@ -359,7 +372,7 @@ esp_err_t WSServer::ws_handler(httpd_req_t *req)
 
     if (ws_pkt.len)
     {
-        if (ws_pkt.len > MAX_MESSAGE_SIZE)
+        if (ws_pkt.len > MAX_MESSAGE_SIZE-1)
         {
             if (debug)
             {
@@ -367,14 +380,14 @@ esp_err_t WSServer::ws_handler(httpd_req_t *req)
             }
             return ESP_ERR_NO_MEM;
         }
-        buffer = static_cast<uint8_t *>(pvPortMalloc(ws_pkt.len));
+        buffer = static_cast<uint8_t *>(pvPortMalloc(ws_pkt.len+1));
         if (buffer == nullptr)
         {
             ESP_LOGE(TAG, "Failed to allocate buffer for WebSocket payload");
             return ESP_ERR_NO_MEM;
         }
         ws_pkt.payload = buffer;
-        memset(buffer, 0, ws_pkt.len);
+        memset(buffer, 0, ws_pkt.len+1);
 
         ret = httpd_ws_recv_frame(req, &ws_pkt, ws_pkt.len);
         if (ret != ESP_OK)
@@ -383,7 +396,10 @@ esp_err_t WSServer::ws_handler(httpd_req_t *req)
             {
                 ESP_LOGE(TAG, "httpd_ws_recv_frame failed with %d", ret);
             }
-            vPortFree(buffer);
+            if (buffer != nullptr)
+            {
+                vPortFree(buffer);
+            }
             return ret;
         }
     }
@@ -394,7 +410,9 @@ esp_err_t WSServer::ws_handler(httpd_req_t *req)
 
     switch (ws_pkt.type)
     {
-
+    case HTTPD_WS_TYPE_CONTINUE:
+        ESP_LOGI(TAG, "Received continue ");
+        break;
     case HTTPD_WS_TYPE_PONG:
     {
         if (debug)
@@ -446,7 +464,7 @@ esp_err_t WSServer::ws_handler(httpd_req_t *req)
         break;
     }
 
-    if (buffer)
+    if (buffer != nullptr)
     {
         vPortFree(buffer);
     }
@@ -470,7 +488,8 @@ esp_err_t WSServer::ws_open_fd(httpd_handle_t hd, int sockfd)
 
 void WSServer::ws_close_fd(httpd_handle_t hd, int sockfd)
 {
-
+    keep_alive->removeClient(sockfd);
+    authenticated_clients.erase(sockfd);
     if (client_disconnected_callback)
     {
         client_disconnected_callback(sockfd);
@@ -480,8 +499,6 @@ void WSServer::ws_close_fd(httpd_handle_t hd, int sockfd)
         ESP_LOGI(TAG, "Client disconnected %d", sockfd);
     }
 
-    keep_alive->removeClient(sockfd);
-    authenticated_clients.erase(sockfd);
     close(sockfd);
 }
 
@@ -496,7 +513,10 @@ void WSServer::send_ping(void *arg)
     ws_pkt.len = 0;
     ws_pkt.type = HTTPD_WS_TYPE_PING;
     httpd_ws_send_frame_async(hd, fd, &ws_pkt);
-    vPortFree(resp_arg);
+    if (resp_arg != nullptr)
+    {
+        vPortFree(resp_arg);
+    }
 }
 
 bool WSServer::client_not_alive_cb(KeepAlive *h, int fd)
@@ -526,7 +546,10 @@ bool WSServer::check_client_alive_cb(KeepAlive *h, int fd)
     {
         return true;
     }
-    vPortFree(resp_arg);
+    if (resp_arg != nullptr)
+    {
+        vPortFree(resp_arg);
+    }
     return false;
 }
 
@@ -581,6 +604,10 @@ void WSServer::ws_server_send_messages()
     {
         if (xQueueReceive(ws_send_queue, &msg, portMAX_DELAY) == pdPASS)
         {
+            if (msg == nullptr)
+            {
+                continue;
+            }
             httpd_ws_frame_t ws_pkt;
             memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
             ws_pkt.type = msg->message_type;
@@ -590,7 +617,10 @@ void WSServer::ws_server_send_messages()
             if (ws_pkt.len > MAX_MESSAGE_SIZE)
             {
                 ESP_LOGE(TAG, "Message size exceeds buffer limit");
-                vPortFree(msg);
+                if (msg != nullptr)
+                {
+                    vPortFree(msg);
+                }
                 continue;
             }
 
@@ -629,7 +659,10 @@ void WSServer::ws_server_send_messages()
                 }
                 vTaskDelay(pdMS_TO_TICKS(1));
             }
-            vPortFree(msg);
+            if (msg != nullptr)
+            {
+                vPortFree(msg);
+            }
         }
     }
 }
@@ -671,4 +704,23 @@ bool WSServer::authenticate(httpd_req_t *req)
     httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"WSServer\"");
     httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "Unauthorized");
     return false;
+}
+
+esp_err_t WSServer::kill_server()
+{
+    if (server != nullptr)
+    {
+        esp_err_t err = stop_ws_server(server);
+        if (err == ESP_OK)
+        {
+            server = nullptr;
+            if (serverTask != nullptr)
+            {
+                vTaskDelete(serverTask);
+            }
+            return ESP_OK;
+        }
+        return err;
+    }
+    return ESP_FAIL;
 }

@@ -15,7 +15,19 @@ extern "C" void app_main(void)
     WSServer &server = WSServer::getInstance();
 
     // Start the WebSocket server
-    server.start(80, "default_ssid", "default_password", true, false, 4, 10000, 30000, nullptr);
+    server.start(80,                    /*<< port*/
+                 ssid.c_str(),          /*<< ssid*/
+                 "OtisCorporation1853", /*<< password*/
+                 true,                  /*<< isAP*/
+                 false,                 /*<< SSL*/
+                 1,                     /*<< max_clients*/
+                 10000,                 /*<< keep_alive_period*/
+                 30000,                 /*<< not_alive_after*/
+                 nullptr,               /*<< auth_user*/
+                 nullptr, /*<< auth_pass*/
+                 true,  /*<< keep_alive_task*/
+                 nullptr // Start DHCP server
+                 );
 
     // Set the callback for text messages
     server.onTextMessage([&server](httpd_req_t *req, httpd_ws_frame_t &frame) {

@@ -35,6 +35,7 @@
 #include "keep_alive.h"
 #include <algorithm>
 
+TaskHandle_t keepAliveTask;
 KeepAlive::KeepAlive(const Config &config) : config(config), queue(nullptr), running(false) {}
 
 KeepAlive::~KeepAlive()
@@ -61,32 +62,43 @@ bool KeepAlive::start()
     }
     running = true;
 
-    xTaskCreatePinnedToCore(task, "keep_alive_task", config.task_stack_size, this, config.task_prio, nullptr, 1);
+    if (config.task_enabled)
+    {
+        xTaskCreate(task, "keep_alive_task", config.task_stack_size, this, config.task_prio, &keepAliveTask);
+    }
 
     return true;
 }
 
 void KeepAlive::stop()
 {
-    if (!running)
-        return;
+     if (!running) return;
     running = false;
-
+    if (!config.task_enabled)
+        return;
     Client *dummy = new (std::nothrow) Client{-1, 0};
     if (dummy != nullptr)
     {
         xQueueSend(queue, &dummy, portMAX_DELAY);
         delete dummy;
     }
-
-    vQueueDelete(queue);
-    queue = nullptr;
-
-    for (auto client : clients)
+    if (queue != nullptr)
     {
-        delete client;
+        vQueueDelete(queue);
+        queue = nullptr;
     }
-    clients.clear();
+    if (!clients.empty())
+    {
+        for (auto client : clients)
+        {
+            delete client;
+        }
+        clients.clear();
+    }
+    if (keepAliveTask != nullptr)
+    {
+        vTaskDelete(keepAliveTask);
+    }
 }
 
 bool KeepAlive::addClient(int fd)
