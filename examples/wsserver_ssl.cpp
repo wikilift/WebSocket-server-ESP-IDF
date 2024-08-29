@@ -19,7 +19,7 @@ extern "C" void app_main(void)
     WSServer &server = WSServer::getInstance();
 
     // Start the WebSocket server with SSL enabled
-    server.start(80,                    /*<< port*/
+    server.start(443,                    /*<< port*/
                  ssid.c_str(),          /*<< ssid*/
                  "OtisCorporation1853", /*<< password*/
                  true,                  /*<< isAP*/
