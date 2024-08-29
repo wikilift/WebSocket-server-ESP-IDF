@@ -16,8 +16,8 @@ extern "C" void app_main(void)
 
     // Start the WebSocket server
     server.start(80,                    /*<< port*/
-                 ssid.c_str(),          /*<< ssid*/
-                 "OtisCorporation1853", /*<< password*/
+                 'mySSID',          /*<< ssid*/
+                 "mySecretPwd", /*<< password*/
                  true,                  /*<< isAP*/
                  false,                 /*<< SSL*/
                  1,                     /*<< max_clients*/

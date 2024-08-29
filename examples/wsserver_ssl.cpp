@@ -20,10 +20,10 @@ extern "C" void app_main(void)
 
     // Start the WebSocket server with SSL enabled
     server.start(443,                    /*<< port*/
-                 ssid.c_str(),          /*<< ssid*/
-                 "OtisCorporation1853", /*<< password*/
+                 'mySSID',          /*<< ssid*/
+                 "mySecretPwd", /*<< password*/
                  true,                  /*<< isAP*/
-                 true,                 /*<< SSL*/
+                 true,                  /*<< SSL remember provide valid certs*/
                  4,                     /*<< max_clients*/
                  10000,                 /*<< keep_alive_period*/
                  30000,                 /*<< not_alive_after*/
