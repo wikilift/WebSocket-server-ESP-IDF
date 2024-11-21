@@ -144,7 +144,7 @@ extern "C" void app_main(void) {
     // Start the WebSocket server with authentication
      server.start(443,                    /*<< port*/
                  ssid.c_str(),          /*<< ssid*/
-                 "OtisCorporation1853", /*<< password*/
+                 "mysecretpassword121", /*<< password*/
                  true,                  /*<< isAP*/
                  true,                 /*<< SSL*/
                  4,                     /*<< max_clients*/
